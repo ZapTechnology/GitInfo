@@ -91,6 +91,7 @@
   GitInfoBaseDir:       $(GitInfoBaseDir)
   GitRoot:              $(GitRoot)
   GitBranch:            $(GitBranch)
+  GitBranchEscaped:     $(GitBranchEscaped)
   GitCommit:            $(GitCommit)
   GitSha:               $(GitSha)
   GitBaseVersion:       $(GitBaseVersion)
@@ -293,6 +294,7 @@
 
 		<PropertyGroup>
 			<GitBranch Condition="'$(GitBranch)' == ''">%(GitInfo.GitBranch)</GitBranch>
+			<GitBranchEscaped Condition="'$(GitBranchEscaped)' == ''">%(GitInfo.GitBranchEscaped)</GitBranchEscaped>
 			<GitCommit Condition="'$(GitCommit)' == ''">%(GitInfo.GitCommit)</GitCommit>
 			<GitSha Condition="'$(GitSha)' == ''">%(GitInfo.GitSha)</GitSha>
 			<GitBaseVersion Condition="'$(GitBaseVersion)' == ''">%(GitInfo.GitBaseVersion)</GitBaseVersion>
@@ -341,6 +343,9 @@
 			<GitBranch>$(GitDefaultBranch)</GitBranch>
 		</PropertyGroup>
 
+		<PropertyGroup>
+			<GitBranchEscaped>$([System.Text.RegularExpressions.Regex]::Replace($(GitBranch), '[^0-9A-Za-z]', '-'))</GitBranchEscaped>
+		</PropertyGroup>
 	</Target>
 
 	<Target Name="_GitCommit" Returns="$(GitCommit)"
@@ -699,6 +704,7 @@
 			<_GitInfoContent>$([System.IO.File]::ReadAllText('$(MSBuildThisFileDirectory)GitInfo.cache.pp'))</_GitInfoContent>
 
 			<_GitInfoContent>$(_GitInfoContent.Replace('$GitBranch$', '$(GitBranch)'))</_GitInfoContent>
+			<_GitInfoContent>$(_GitInfoContent.Replace('$GitBranchEscaped$', '$(GitBranchEscaped)'))</_GitInfoContent>
 			<_GitInfoContent>$(_GitInfoContent.Replace('$GitCommits$', '$(GitCommits)'))</_GitInfoContent>
 			<_GitInfoContent>$(_GitInfoContent.Replace('$GitCommit$', '$(GitCommit)'))</_GitInfoContent>
 			<_GitInfoContent>$(_GitInfoContent.Replace('$GitSha$', '$(GitSha)'))</_GitInfoContent>
@@ -775,6 +781,7 @@
 			<_ThisAssemblyContent Condition="'$(Language)' == 'VB' And '$(GitIsDirty)' == '0'">$(_ThisAssemblyContent.Replace('$GitIsDirty$', 'False'))</_ThisAssemblyContent>
 			
 			<_ThisAssemblyContent>$(_ThisAssemblyContent.Replace('$GitBranch$', '$(GitBranch)'))</_ThisAssemblyContent>
+			<_ThisAssemblyContent>$(_ThisAssemblyContent.Replace('$GitBranchEscaped$', '$(GitBranchEscaped)'))</_ThisAssemblyContent>
 			<_ThisAssemblyContent>$(_ThisAssemblyContent.Replace('$GitCommits$', '$(GitCommits)'))</_ThisAssemblyContent>
 			<_ThisAssemblyContent>$(_ThisAssemblyContent.Replace('$GitCommit$', '$(GitCommit)'))</_ThisAssemblyContent>
 			<_ThisAssemblyContent>$(_ThisAssemblyContent.Replace('$GitSha$', '$(GitSha)'))</_ThisAssemblyContent>
