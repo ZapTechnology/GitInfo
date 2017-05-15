@@ -36,6 +36,12 @@ namespace _RootNamespace_
       
       /// <summary>Branch: $GitBranch$</summary>
       public const string Branch = "$GitBranch$";
+	  
+	  /// <summary>Branch with folder path: $FullBranch$</summary>
+      public const string FullBranch = "$GitFullBranch$";
+
+	  /// <summary>Branch: $GitBranchEscaped$</summary>
+      public const string BranchEscaped = "$GitBranchEscaped$";
 
       /// <summary>Commit: $GitCommit$</summary>
       public const string Commit = "$GitCommit$";

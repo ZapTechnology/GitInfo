@@ -1,4 +1,6 @@
 GitBranch=$GitBranch$;
+GitFullBranch=$GitFullBranch$;
+GitBranchEscaped=$GitBranchEscaped$;
 GitCommit=$GitCommit$;
 GitSha=$GitSha$;
 GitBaseVersion=$GitBaseVersion$;

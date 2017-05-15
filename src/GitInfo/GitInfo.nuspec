@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <package>
 	<metadata>
-		<id>GitInfo</id>
+		<id>GitInfo-zap</id>
 		<version>$version$</version>
 		<title>Git and SemVer info for MSBuild/C#/VB</title>
 		<authors>Daniel Cazzulino</authors>
