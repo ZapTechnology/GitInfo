@@ -44,7 +44,7 @@ The generated code contains only constants, so it can be used to construct your 
     <file src="build\GitInfo.cache.pp" target="build" />
     <file src="build\GitInfo.cs.pp" target="build" />
     <file src="build\GitInfo.vb.pp" target="build" />
-    <file src="build\GitInfo.targets" target="build" />
+    <file src="build\GitInfo-zap.targets" target="build" />
     <file src="build\GitInfo.xbuild" target="build" />
   </files>
 </package>

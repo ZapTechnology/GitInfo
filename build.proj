@@ -26,6 +26,6 @@
               ContinueOnError="WarnAndContinue" />   		
 	</Target>
 
-	<Import Project="src\GitInfo\build\GitInfo.targets" />
+	<Import Project="src\GitInfo\build\GitInfo-zap.targets" />
 	
 </Project>
