@@ -108,7 +108,6 @@
   GitRoot:              $(GitRoot)
   GitBranch:            $(GitBranch)
   GitBranchEscaped:     $(GitBranchEscaped)
-  GitFullBranch:        $(GitFullBranch)
   GitCommit:            $(GitCommit)
   GitSha:               $(GitSha)
   GitBaseVersion:       $(GitBaseVersion)
@@ -351,7 +350,6 @@
 
 		<PropertyGroup>
 			<GitBranch Condition="'$(GitBranch)' == ''">%(GitInfo.GitBranch)</GitBranch>
-			<GitFullBranch Condition="'$(GitFullBranch)' == ''">%(GitInfo.GitFullBranch)</GitFullBranch>
 			<GitBranchEscaped Condition="'$(GitBranchEscaped)' == ''">%(GitInfo.GitBranchEscaped)</GitBranchEscaped>
 			<GitCommit Condition="'$(GitCommit)' == ''">%(GitInfo.GitCommit)</GitCommit>
 			<GitSha Condition="'$(GitSha)' == ''">%(GitInfo.GitSha)</GitSha>
@@ -382,7 +380,6 @@
 			<_GitHead>$([System.IO.Path]::Combine($(GitDir), 'HEAD'))</_GitHead>
 			<_GitHead>$([System.IO.Path]::GetFullPath($(_GitHead)))</_GitHead>
 			<_GitHead>$([System.IO.File]::ReadAllText('$(_GitHead)'))</_GitHead>
-			<GitFullBranch>$([System.Text.RegularExpressions.Regex]::Match($(_GitHead), '(?&lt;=refs/heads/).+$'))</GitFullBranch>
 			<GitBranch>$([System.Text.RegularExpressions.Regex]::Match($(_GitHead), '(?&lt;=refs/heads/).+$'))</GitBranch>
 			<GitBranch>$(GitBranch.Trim())</GitBranch>
 		</PropertyGroup>
@@ -401,7 +398,6 @@
 
 		<PropertyGroup Condition="'$(GitRoot)' == ''">
 			<GitBranch>$(GitDefaultBranch)</GitBranch>
-			<GitFullBranch>$(GitDefaultBranch)</GitFullBranch>
 		</PropertyGroup>
 
 		<PropertyGroup>
@@ -816,7 +812,6 @@
 			<_GitInfoContent>$([System.IO.File]::ReadAllText('$(MSBuildThisFileDirectory)GitInfo.cache.pp'))</_GitInfoContent>
 
 			<_GitInfoContent>$(_GitInfoContent.Replace('$GitBranch$', '$(GitBranch)'))</_GitInfoContent>
-			<_GitInfoContent>$(_GitInfoContent.Replace('$GitFullBranch$', '$(GitFullBranch)'))</_GitInfoContent>
 			<_GitInfoContent>$(_GitInfoContent.Replace('$GitBranchEscaped$', '$(GitBranchEscaped)'))</_GitInfoContent>
 			<_GitInfoContent>$(_GitInfoContent.Replace('$GitCommits$', '$(GitCommits)'))</_GitInfoContent>
 			<_GitInfoContent>$(_GitInfoContent.Replace('$GitCommit$', '$(GitCommit)'))</_GitInfoContent>
@@ -897,7 +892,6 @@
 			<_ThisAssemblyContent Condition="'$(Language)' == 'VB' And '$(GitIsDirty)' == '0'">$(_ThisAssemblyContent.Replace('$GitIsDirty$', 'False'))</_ThisAssemblyContent>
 			
 			<_ThisAssemblyContent>$(_ThisAssemblyContent.Replace('$GitBranch$', '$(GitBranch)'))</_ThisAssemblyContent>
-			<_ThisAssemblyContent>$(_ThisAssemblyContent.Replace('$GitFullBranch$', '$(GitFullBranch)'))</_ThisAssemblyContent>
 			<_ThisAssemblyContent>$(_ThisAssemblyContent.Replace('$GitBranchEscaped$', '$(GitBranchEscaped)'))</_ThisAssemblyContent>
 			<_ThisAssemblyContent>$(_ThisAssemblyContent.Replace('$GitCommits$', '$(GitCommits)'))</_ThisAssemblyContent>
 			<_ThisAssemblyContent>$(_ThisAssemblyContent.Replace('$GitCommit$', '$(GitCommit)'))</_ThisAssemblyContent>
