@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+<Project ToolsVersion="4.0" InitialTargets="SetGitExe" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
 	<!--
   ==============================================================
               Retrieves and exposes Git information 
@@ -32,6 +32,10 @@
 					   version info.
 					   Defaults to 'GitInfo.txt'.
 
+	$(GitCommitsRelativeTo): optionally specifies an alternative directory 
+							 for counting commits on top of the base version.
+							 Defaults to the $(GitVersionFile) directory.
+
 	$(GitInfoReportImportance): allows rendering all the retrieved
 								git information with the specified
 								message importance ('high', 'normal' or 'low').
@@ -41,6 +45,12 @@
 								whether the branch and tags (if any) 
 								will be used to find a base version.
 								Defaults to empty value (no ignoring).
+
+	$(GitSkipCache): whether to cache the Git information determined 
+					 in a previous build in a GitInfo.cache for 
+					 performance reasons. 
+					 Defaults to empty value (no ignoring).
+
 	==============================================================
 	-->
 
@@ -69,6 +79,12 @@
 		<!-- Defaults if overrides are specified when building -->
 		<GitCommits Condition="'$(GitCommits)' == ''">0</GitCommits>
 		<GitSemVerSource Condition="'$(GitBaseVersion)' != ''">MSBuild</GitSemVerSource>
+		
+		<GitSkipCache Condition="'$(GitSkipCache)' == ''">false</GitSkipCache>
+		<SkipReadGitCache Condition="'$(SkipReadGitCache)' == ''">$(GitSkipCache)</SkipReadGitCache>
+		<SkipWriteGitCache Condition="'$(SkipWriteGitCache)' == ''">$(GitSkipCache)</SkipWriteGitCache>
+
+		<GitMinVersion>2.5.0</GitMinVersion>
 	</PropertyGroup>
 
 	<!-- Private properties -->
@@ -114,6 +130,8 @@
 
 	<PropertyGroup>
 		<GitInfoDependsOn>
+			SetGitExe;
+			_EnsureGit;
 			_GitRoot;
 			_GitInputs;
 			_GitClearCache;
@@ -135,9 +153,30 @@
 
 	<Target Name="GitInfo" DependsOnTargets="$(GitInfoDependsOn)" Returns="@(GitInfo)" />
 
+	<Target Name="_EnsureGit">
+		<Exec Command='$(GitExe) --version'
+			  EchoOff='true'
+			  ContinueOnError='true'
+			  ConsoleToMSBuild='true'
+			  StandardErrorImportance='high'
+			  StandardOutputImportance='low'>
+			<Output TaskParameter="ConsoleOutput" PropertyName="_GitOutput"/>
+			<Output TaskParameter="ExitCode" PropertyName="MSBuildLastExitCode" />
+		</Exec>
+		<Error Condition="'$(MSBuildLastExitCode)' != '0'" Text="Failed to run `git --version`. Git may not be properly installed: %0A $(_GitOutput)" />
+
+		<PropertyGroup>
+			<_GitCurrentVersion>$([System.Text.RegularExpressions.Regex]::Match("$(_GitOutput)", "\d+\.\d+\.\d+").Value)</_GitCurrentVersion>
+		</PropertyGroup>
+
+		<Error Condition="$([System.Version]::Parse('$(_GitCurrentVersion)').CompareTo($([System.Version]::Parse('$(GitMinVersion)')))) &lt; 0"
+			   Text="Required minimum git version is $(GitMinVersion) but found $(_GitCurrentVersion)." />
+	</Target>
+
 	<Target Name="_GitRoot" Returns="$(GitRoot)" Condition="'$(GitRoot)' == ''">
 
 		<Exec Command='$(GitExe) rev-parse --show-toplevel'
+			  EchoOff='true'
 			  StandardErrorImportance='high'
 			  StandardOutputImportance='low'
 			  ConsoleToMSBuild='true'
@@ -151,8 +190,9 @@
 			<GitRoot>$(_GitOutput.Trim())</GitRoot>
 		</PropertyGroup>
 
-		<!-- Account for cygwin separately -->
+		<!-- Account for cygwin/WSL separately -->
 		<Exec Command='"$(CygPathExe)" -w "$(_GitOutput)"' 
+			  EchoOff='true'
 			  WorkingDirectory="$(GitInfoBaseDir)"
 			  StandardErrorImportance='high'
 			  StandardOutputImportance='low'
@@ -179,6 +219,7 @@
 
 		<Exec Condition="'$(_IsGitFile)' == 'true'"
 			  Command='$(GitExe) rev-parse --is-inside-work-tree'
+			  EchoOff='true'
 			  StandardErrorImportance='high'
 			  StandardOutputImportance='low'
 			  ConsoleToMSBuild='true'
@@ -194,6 +235,7 @@
 
 		<Exec Condition="'$(_IsGitFile)' == 'true' and '$(_IsGitWorkTree)' == 'true'"
 			  Command='$(GitExe) rev-parse --git-common-dir'
+			  EchoOff='true'
 			  StandardErrorImportance='high'
 			  StandardOutputImportance='low'
 			  ConsoleToMSBuild='true'
@@ -203,8 +245,20 @@
 			<Output TaskParameter="ExitCode" PropertyName="MSBuildLastExitCode" />
 		</Exec>
 
+		<!-- Account for cygwin/WSL separately -->
+		<Exec Command='"$(CygPathExe)" -w "$(_GitCommonDir)"' 
+			  EchoOff='true'
+			  WorkingDirectory="$(GitInfoBaseDir)"
+			  StandardErrorImportance='high'
+			  StandardOutputImportance='low'
+			  ConsoleToMSBuild='true'
+			  Condition="'$(_IsGitFile)' == 'true' and '$(_IsGitWorkTree)' == 'true' And '$(MSBuildLastExitCode)' == '0' And '$(CygPathExe)' != ''">
+			<Output TaskParameter="ConsoleOutput" PropertyName="_GitCommonDir" />
+			<Output TaskParameter="ExitCode" PropertyName="MSBuildLastExitCode" />
+		</Exec>
+
 		<PropertyGroup Condition="'$(_IsGitFile)' == 'true' and '$(_IsGitWorkTree)' == 'true'">
-			<GitDir>$(_GitCommonDir)</GitDir>
+			<GitDir>$(_GitCommonDir.Trim())</GitDir>
 		</PropertyGroup>
 
 		<PropertyGroup Condition="'$(_IsGitFile)' == 'true' and '$(_IsGitWorkTree)' != 'true'">
@@ -222,11 +276,10 @@
 		<Warning Text="Directory $(GitInfoBaseDir) is not in a Git repository. Cannot determine Git repository root." Condition="'$(GitRoot)' == ''" />
 
 		<Exec Command='$(GitExe) diff-index --quiet HEAD'
-			  EchoOff="true"
 			  Condition="'$(GitRoot)' != ''"
+			  EchoOff='true'
 			  StandardErrorImportance="low"
 			  StandardOutputImportance="low"
-			  ConsoleToMSBuild="true"
 			  WorkingDirectory="$(GitRoot)"
 			  IgnoreExitCode="true">
 			<Output TaskParameter="ExitCode" PropertyName="GitIsDirty" />
@@ -330,13 +383,14 @@
 			<_GitHead>$([System.IO.Path]::GetFullPath($(_GitHead)))</_GitHead>
 			<_GitHead>$([System.IO.File]::ReadAllText('$(_GitHead)'))</_GitHead>
 			<GitFullBranch>$([System.Text.RegularExpressions.Regex]::Match($(_GitHead), '(?&lt;=refs/heads/).+$'))</GitFullBranch>
-			<GitBranch>$([System.Text.RegularExpressions.Regex]::Match($(_GitHead), '(?&lt;=/)[^/]+$'))</GitBranch>
+			<GitBranch>$([System.Text.RegularExpressions.Regex]::Match($(_GitHead), '(?&lt;=refs/heads/).+$'))</GitBranch>
 			<GitBranch>$(GitBranch.Trim())</GitBranch>
 		</PropertyGroup>
 
 		<!-- CI systems may checkout the specific commit, rather than the branch, so we need to fallback -->
 		<Exec Command='$(GitExe) name-rev --name-only HEAD'
 			  Condition=" '$(GitBranch)' == '' "
+			  EchoOff='true'
 			  StandardErrorImportance="low"
 			  StandardOutputImportance="low"
 			  ConsoleToMSBuild="true"
@@ -362,6 +416,7 @@
 			Condition="'$(GitRoot)' != '' And '$(GitCommit)' == ''">
 
 		<Exec Command='$(GitExe) log --format=format:$(_ShortShaFormat) -n 1'
+			  EchoOff='true'
 			  StandardErrorImportance="low"
 			  StandardOutputImportance="low"
 			  ConsoleToMSBuild="true"
@@ -376,6 +431,7 @@
 		</PropertyGroup>
 
 		<Exec Command='$(GitExe) log --format=format:$(_LongShaFormat) -n 1'
+			  EchoOff='true'
 			  StandardErrorImportance="low"
 			  StandardOutputImportance="low"
 			  ConsoleToMSBuild="true"
@@ -397,6 +453,7 @@
 				<GitRoot>$(GitRoot)</GitRoot>
 				<GitBranch>$(GitBranch)</GitBranch>
 				<GitCommit>$(GitCommit)</GitCommit>
+				<GitSha>$(GitSha)</GitSha>
 			</GitInfo>
 		</ItemGroup>
 	</Target>
@@ -435,13 +492,27 @@
 						 Condition="'$(IsValidGitBaseVersion)' == 'False'" />
 
 		<PropertyGroup>
+			<_GitVersionFile>$(GitVersionFile)</_GitVersionFile>
 			<GitBaseVersionSource>$(GitVersionFile)</GitBaseVersionSource>
 			<GitSemVerSource>File</GitSemVerSource>
 		</PropertyGroup>
 
 		<Message Text="Using base version from version file $(GitVersionFile)'" Importance="normal" />
 
-		<Exec Command='$(GitExe) log -n 1 --format=format:$(_ShortShaFormat) "$(GitVersionFile)"'
+		<!-- Account for cygwin/WSL separately -->
+		<Exec Command='"$(CygPathExe)" -u "$(_GitVersionFile)"' 
+			  EchoOff='true'
+			  WorkingDirectory="$(GitRoot)"
+			  StandardErrorImportance='high'
+			  StandardOutputImportance='low'
+			  ConsoleToMSBuild='true'
+			  Condition="'$(MSBuildLastExitCode)' == '0' And '$(CygPathExe)' != ''">
+			<Output TaskParameter="ConsoleOutput" PropertyName="_GitVersionFile" />
+			<Output TaskParameter="ExitCode" PropertyName="MSBuildLastExitCode" />
+		</Exec>
+
+		<Exec Command='$(GitExe) log -n 1 --format=format:$(_ShortShaFormat) "$(_GitVersionFile)"'
+			  EchoOff='true'
 			  StandardErrorImportance="low"
 			  StandardOutputImportance="low"
 			  ConsoleToMSBuild="true"
@@ -457,15 +528,31 @@
 		<PropertyGroup>
 			<GitCommits Condition="'$(MSBuildLastExitCode)' != '0' Or '$(_GitLastBump)' == ''">0</GitCommits>
 			<_GitLastBump>$(_GitLastBump.Trim())</_GitLastBump>
+			<_GitCommitsRelativeTo>$(GitCommitsRelativeTo)</_GitCommitsRelativeTo>
 			<!-- If the GitVersionFile is at the GitRoot dir, there won't be a directory to specify to base the rev-list count, so no need to quote anything -->
-			<_GitCommitsRelativeTo Condition="'$([System.IO.Path]::GetDirectoryName($(GitVersionFile)))' != ''">"$([System.IO.Path]::GetDirectoryName("$(GitVersionFile)"))"</_GitCommitsRelativeTo>
+			<_GitCommitsRelativeTo Condition="'$(_GitCommitsRelativeTo)' == '' And '$([System.IO.Path]::GetDirectoryName($(GitVersionFile)))' != ''">"$([System.IO.Path]::GetDirectoryName("$(GitVersionFile)"))"</_GitCommitsRelativeTo>
+			<!-- If the GitVersionFile is at the GitRoot dir, we use the current directory '.' for the count. This allows us to exclude submodule commits -->
+			<_GitCommitsRelativeTo Condition="'$(_GitCommitsRelativeTo)' == ''">.</_GitCommitsRelativeTo>
 			<_GitCommitsRelativeTo>$(_GitCommitsRelativeTo) @(IncludeFiles->'"%(FullPath)"', ' ')</_GitCommitsRelativeTo>
 		</PropertyGroup>
 
 		<Message Text='Running command: $(GitExe) rev-list --count --full-history "$(_GitLastBump)"..HEAD $(_GitCommitsRelativeTo)' Importance="normal" />
-		
+
+		<!-- Account for cygwin/WSL separately -->
+		<Exec Command='"$(CygPathExe)" -u $(_GitCommitsRelativeTo)' 
+			  EchoOff='true'
+			  WorkingDirectory="$(GitRoot)"
+			  StandardErrorImportance='high'
+			  StandardOutputImportance='low'
+			  ConsoleToMSBuild='true'
+			  Condition="'$(MSBuildLastExitCode)' == '0' And '$(CygPathExe)' != '' And '$(_GitCommitsRelativeTo)' != ''">
+			<Output TaskParameter="ConsoleOutput" PropertyName="_GitCommitsRelativeTo" />
+			<Output TaskParameter="ExitCode" PropertyName="MSBuildLastExitCode" />
+		</Exec>
+
 		<Exec Command='$(GitExe) rev-list --count --full-history "$(_GitLastBump)"..HEAD $(_GitCommitsRelativeTo)'
 			  Condition="$(MSBuildLastExitCode) == '0' And '$(_GitLastBump)' != ''"
+			  EchoOff='true'
 			  StandardErrorImportance="low"
 			  StandardOutputImportance="low"
 			  ConsoleToMSBuild="true"
@@ -502,6 +589,7 @@
 		<!-- Get the initial commit when the current branch departed from the default branch -->
 		<Exec Command='$(GitExe) merge-base --fork-point "$(GitDefaultBranch)"'
 			  Condition="'$(IsValidGitBaseVersion)' == 'true'"
+			  EchoOff='true'
 			  StandardErrorImportance="low"
 			  StandardOutputImportance="low"
 			  ConsoleToMSBuild="true"
@@ -521,6 +609,7 @@
 		<!-- Get the commit count from the fork point to the current branch head -->
 		<Exec Command='$(GitExe) rev-list --count "$(_GitForkPoint)"..HEAD'
 			  Condition="'$(IsValidGitBaseVersion)' == 'true' and '$(MSBuildLastExitCode)' == '0'"
+			  EchoOff='true'
 			  StandardErrorImportance="low"
 			  StandardOutputImportance="low"
 			  ConsoleToMSBuild="true"
@@ -539,6 +628,7 @@
 			Condition="'$(GitBaseVersion)' == '' And '$(GitIgnoreTagVersion)' != 'true' ">
 
 		<Exec Command='$(GitExe) describe --tags --abbrev=0'
+			  EchoOff='true'
 			  StandardErrorImportance="low"
 			  StandardOutputImportance="low"
 			  ConsoleToMSBuild="true"
@@ -567,6 +657,7 @@
 
 		<!-- At this point, we now there is a base tag already we can leverage -->
 		<Exec Command='$(GitExe) describe --tags'
+			  EchoOff='true'
 			  StandardErrorImportance="low"
 			  StandardOutputImportance="low"
 			  ConsoleToMSBuild="true"
@@ -596,6 +687,7 @@
 
 		<Exec Command='$(GitExe) rev-list "$(GitBaseTag)" -n 1'
 			  Condition="'$(IsValidGitBaseVersion)' == 'true'"
+			  EchoOff='true'
 			  StandardErrorImportance="low"
 			  StandardOutputImportance="low"
 			  ConsoleToMSBuild="true"
@@ -607,6 +699,7 @@
 
 		<Exec Command='$(GitExe) rev-list --count "$(_GitBaseTagCommit)".."$(GitCommit)"'
 			  Condition="'$(IsValidGitBaseVersion)' == 'true' And '$(_GitBaseTagCommit)' != '' And '$(GitCommit)' != '' And '$(GitCommit)' != '$(GitDefaultCommit)'"
+			  EchoOff='true'
 			  StandardErrorImportance="low"
 			  StandardOutputImportance="low"
 			  ConsoleToMSBuild="true"
@@ -616,7 +709,7 @@
 			<Output TaskParameter="ExitCode" PropertyName="MSBuildLastExitCode" />
 		</Exec>
 
-		<Warning Text="Failed to retrieve commit count from tag '$(GitBaseTag)' to tip ${GitCommit). Defaulting to zero commits."
+		<Warning Text="Failed to retrieve commit count from tag '$(GitBaseTag)' to tip $(GitCommit). Defaulting to zero commits."
 				 Condition="'$(IsValidGitBaseVersion)' == 'true' And '$(MSBuildLastExitCode)' != '0'" />
 
 		<PropertyGroup>
@@ -635,16 +728,28 @@
 				$([System.Text.RegularExpressions.Regex]::IsMatch($(GitDefaultVersion), $(_GitBaseVersionExpr)))
 			</IsValidGitDefaultVersion>
 			<IsValidGitDefaultVersion>$(IsValidGitDefaultVersion.Trim())</IsValidGitDefaultVersion>
+			<GitCommits>0</GitCommits>
 		</PropertyGroup>
 
 		<!-- If $(GitBaseVersion) == '' And $(IsValidGitBaseVersion) == ''  -->
 		<Error Text="Fallback version %24(GitDefaultVersion) value of '$(GitDefaultVersion)' is not a valid SemVer 2.0 string."
 			   Condition="'$(IsValidGitDefaultVersion)' == 'false'" />
 
+		<Exec Command='$(GitExe) rev-list --count $(GitCommit)'
+			  Condition="'$(IsValidGitDefaultVersion)' == 'true' And '$(GitCommit)' != '' And '$(GitCommit)' != '$(GitDefaultCommit)'"
+			  EchoOff='true'
+			  StandardErrorImportance="low"
+			  StandardOutputImportance="low"
+			  ConsoleToMSBuild="true"
+			  WorkingDirectory="$(GitRoot)"
+			  ContinueOnError="true">
+			<Output TaskParameter="ConsoleOutput" PropertyName="GitCommits"/>
+			<Output TaskParameter="ExitCode" PropertyName="MSBuildLastExitCode" />
+		</Exec>
+
 		<PropertyGroup>
 			<GitBaseVersion>$(GitDefaultVersion)</GitBaseVersion>
 			<GitSemVerSource>Default</GitSemVerSource>
-			<GitCommits>0</GitCommits>
 		</PropertyGroup>
 
 	</Target>
@@ -758,7 +863,10 @@
 			BeforeTargets="BuildOnlySettings" Condition="'$(GitThisAssembly)' == 'true'">
 
 		<ItemGroup>
+			<Compile Remove="$(GitInfoThisAssemblyFile)" />
 			<Compile Include="$(GitInfoThisAssemblyFile)" />
+			<!-- For the double compilation happening with XAML projects. -->
+      		<_GeneratedCodeFiles Include="$(GitInfoThisAssemblyFile)" />
 		</ItemGroup>
 
 	</Target>
@@ -816,14 +924,6 @@
 		<MakeDir Directories="$(GitInfoThisAssemblyDir)" Condition="!Exists('$(GitInfoThisAssemblyDir)')" />
 
 		<WriteLinesToFile File='$(GitInfoThisAssemblyFile)' Lines='$(_ThisAssemblyContent)' Overwrite='true' />
-
-		<!-- Denotes xbuild, which doesn't properly handle escaped semicolon %3B -->
-		<Exec Condition="'$(MSBuildRuntimeVersion)' == ''"
-			  Command="sed 's/\(.*\)&quot;/\1&quot;;/' '$(GitInfoThisAssemblyFile)'" />
-		<!-- Remove potential double semi-colon we might have added -->
-		<Exec Condition="'$(MSBuildRuntimeVersion)' == ''"
-			  Command="sed 's/\(.*\)&quot;;;/\1&quot;;/' '$(GitInfoThisAssemblyFile)'" />
-
 	</Target>
 
 	<!--
@@ -831,36 +931,67 @@
               GitExe Property
 	
 	Cascading probing mechanism will try to locate an installed 
-	version of git, msysgit or cygwin git.
+	version of git, msysgit, WSL git or cygwin git.
 	============================================================
 	-->
-	<PropertyGroup Condition="'$(GitExe)' == '' And '$(OS)' == 'Windows_NT'">
-		<!-- We probe multiple places, with the first matching one winning -->
-		<GitExe Condition="'$(GitExe)' == '' And Exists('C:\Program Files\Git\bin\git.exe')">"C:\Program Files\Git\bin\git.exe"</GitExe>
-		<GitExe Condition="'$(GitExe)' == '' And Exists('C:\Program Files (x86)\Git\bin\git.exe')">"C:\Program Files (x86)\Git\bin\git.exe"</GitExe>
-		<GitExe Condition="'$(GitExe)' == '' And Exists('C:\msysgit\bin\git.exe')">C:\msysgit\bin\git.exe</GitExe>
-		<GitExe Condition="'$(GitExe)' == '' And Exists('C:\cygwin\bin\git.exe')">C:\cygwin\bin\git.exe</GitExe>
-		<!-- Ultimately, just try the exe and hope it exists in the PATH already -->
-		<GitExe Condition="'$(GitExe)' == ''">git.exe</GitExe>
-	</PropertyGroup>
 	<PropertyGroup Condition="'$(GitExe)' == '' And '$(OS)' != 'Windows_NT'">
 		<GitExe>git</GitExe>
 	</PropertyGroup>
 
-	<!--
-	============================================================
-              CygPathExe Property
-	
-	If we are using cygwin git, we need to pipe the path to
-	cygpath to convert it into a Windows path. If the path is
-	already a Windows path, it will be returned unchanged.
-	============================================================
-	-->
-	<PropertyGroup Condition="'$(OS)' == 'Windows_NT'">
-		<CygPathExe Condition="'$(CygPathExe)' == '' And Exists('C:\cygwin\bin\cygpath.exe') And $(GitExe.Contains('cygwin'))">C:\cygwin\bin\cygpath.exe</CygPathExe>
-	</PropertyGroup>
+	<Target Name="SetGitExe" Condition="'$(GitExe)' == '' And '$(OS)' == 'Windows_NT'">
+		<!-- If git from %PATH% works, just use that -->
+		<Exec Command='git --version'
+			  EchoOff='true'
+			  ContinueOnError='true'
+			  StandardErrorImportance='high'
+			  StandardOutputImportance='low'>
+			<Output TaskParameter="ExitCode" PropertyName="MSBuildLastExitCode" />
+		</Exec>
+		<PropertyGroup Condition="'$(MSBuildLastExitCode)' == '0'">
+			<GitExe>git</GitExe>
+		</PropertyGroup>
 
-	<Import Project="GitInfo.xbuild" Condition="'$(MSBuildRuntimeVersion)' == ''" />
+		<PropertyGroup Condition="'$(GitExe)' == ''">
+			<!-- We probe multiple places, with the first matching one winning -->
+			<GitExe Condition="'$(GitExe)' == '' And Exists('C:\Program Files\Git\bin\git.exe')">"C:\Program Files\Git\bin\git.exe"</GitExe>
+			<GitExe Condition="'$(GitExe)' == '' And Exists('C:\Program Files (x86)\Git\bin\git.exe')">"C:\Program Files (x86)\Git\bin\git.exe"</GitExe>
+			<GitExe Condition="'$(GitExe)' == '' And Exists('C:\msysgit\bin\git.exe')">C:\msysgit\bin\git.exe</GitExe>
+		</PropertyGroup>
+
+		<!-- If we didn't find it in the PATH nor the above locations, check for git installed in WSL -->
+		<Exec Condition="'$(GitExe)' == ''"
+			  Command="$(MSBuildThisFileDirectory)wslrun.cmd git --version"
+			  EchoOff='true'
+			  ContinueOnError='true'
+			  StandardErrorImportance='high'
+			  StandardOutputImportance='low'>
+			<Output TaskParameter="ExitCode" PropertyName="MSBuildLastExitCode" />
+		</Exec>
+		<PropertyGroup Condition="'$(GitExe)' == '' And '$(MSBuildLastExitCode)' == '0'">
+			<GitExe>$(MSBuildThisFileDirectory)wslrun.cmd git</GitExe>
+			<CygPathExe>$(MSBuildThisFileDirectory)wslpath.cmd</CygPathExe>
+		</PropertyGroup>
+
+		<PropertyGroup Condition="'$(GitExe)' == ''">
+			<!-- Only consider cygwin as a last resort, as it tends to be slower -->
+			<GitExe Condition="'$(GitExe)' == '' And Exists('C:\cygwin\bin\git.exe')">C:\cygwin\bin\git.exe</GitExe>
+			<GitExe Condition="'$(GitExe)' == '' And Exists('C:\cygwin64\bin\git.exe')">C:\cygwin64\bin\git.exe</GitExe>
+		</PropertyGroup>
+
+		<!--
+		============================================================
+				CygPathExe Property
+
+		If we are using cygwin git, we need to pipe the path to
+		cygpath to convert it into a Windows path. If the path is
+		already a Windows path, it will be returned unchanged.
+		============================================================
+		-->
+		<PropertyGroup>
+			<CygPathExe Condition="'$(CygPathExe)' == '' And Exists('C:\cygwin\bin\cygpath.exe') And $(GitExe.Contains('cygwin'))">C:\cygwin\bin\cygpath.exe</CygPathExe>
+			<CygPathExe Condition="'$(CygPathExe)' == '' And Exists('C:\cygwin64\bin\cygpath.exe') And $(GitExe.Contains('cygwin64'))">C:\cygwin64\bin\cygpath.exe</CygPathExe>
+		</PropertyGroup>
+	</Target>
 
 	<PropertyGroup>
 		<GitInfoImported>true</GitInfoImported>
